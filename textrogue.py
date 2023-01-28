@@ -1,7 +1,8 @@
-# simple text-based roguelike test in python
+# simple text-based roguelike
 # tdwsl 2023
 
 import random
+import math
 
 mapw = 50
 maph = 30
@@ -112,6 +113,8 @@ class Actor:
             print("You move {}.".format(dirNames[di]))
         elif m == 0:
             print("You can't go that way.")
+            return False
+        return True
 
 def connectRooms(rooms):
     for i in range(len(rooms)-1):
@@ -285,8 +288,8 @@ def sees(x1, y1, x2, y2):
     else:
         m = abs(yd)
     for i in range(1, m+1):
-        x = x1+(xd*i)//m
-        y = y1+(yd*i)//m
+        x = math.floor(x1+(xd*i)/m+0.5)
+        y = math.floor(y1+(yd*i)/m+0.5)
         if x == x1 and y == y1:
             continue
         if not inBounds(x, y):
@@ -365,6 +368,8 @@ def describe(x, y):
             while getTile(xx+d[0], yy+d[1]) == tl_path:
                 xx += d[0]
                 yy += d[1]
+                if not sees(x, y, xx, yy):
+                    break
                 fork = []
                 for i in range(len(dirs)):
                     dd = dirs[i]
@@ -400,39 +405,31 @@ def describe(x, y):
             if map[i] in [tl_door, tl_up, tl_down]:
                 xd = i%mapw-x
                 yd = i//mapw-y
-                #dist = xd*xd+yd*yd
-                #mapObjects.append(["{} {}".format \
-                      #(tileNames[map[i]], \
-                       #whereStr(x, y, i%mapw, i//mapw)), dist])
                 listItem("{} {}".format \
                       (tileNames[map[i]], \
                        whereStr(x, y, i%mapw, i//mapw)))
-    #def sortMapObj(o):
-        #return o[1]
-    #mapObjects.sort(key=sortMapObj)
-    #for i in range(len(mapObjects)):
-        #o = mapObjects[i][0]
-        #start = "And"
-        #if i == 0:
-            #start = "There is"
-        #print("{} {}".format(start, o))
 
 player = Actor(name="You")
 
 generateMap()
 printMap()
 
+desc = True
 while True:
-    describe(player.x, player.y)
-    line = input(">").lower().split(" ")
-    if "north".startswith(line[0]):
-        player.moveAlert(player.x, player.y-1)
+    if desc:
+        describe(player.x, player.y)
+    desc = False
+    line = input(">").strip().lower().split(" ")
+    if line[0] == "":
+        print("Enter a command.")
+    elif "north".startswith(line[0]):
+        desc = player.moveAlert(player.x, player.y-1)
     elif "east".startswith(line[0]):
-        player.moveAlert(player.x+1, player.y)
+        desc = player.moveAlert(player.x+1, player.y)
     elif "south".startswith(line[0]):
-        player.moveAlert(player.x, player.y+1)
+        desc = player.moveAlert(player.x, player.y+1)
     elif "west".startswith(line[0]):
-        player.moveAlert(player.x-1, player.y)
+        desc = player.moveAlert(player.x-1, player.y)
     elif "quit".startswith(line[0]):
         break
     else:
