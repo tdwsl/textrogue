@@ -2,7 +2,6 @@
 # tdwsl 2023
 
 import random
-import math
 
 mapw = 50
 maph = 30
