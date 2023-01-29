@@ -394,6 +394,7 @@ def generateMap(up=False):
         explored.append(not map[i] in Actor.passable)
     updateExplored(getFov(player.x, player.y))
     turn = 0
+    print("Level {}".format(level))
 
 def printMap():
     for i in range(mapw*maph):
@@ -566,6 +567,23 @@ def autoMove(x, y):
     if old == tl_door and map[player.y*mapw+player.x] == tl_room:
         describe(player.x, player.y, status=False)
 
+def findTile(t):
+    pmap = pathMap(Actor.passable, player.x, player.y)
+    closest = -1
+    for i in range(mapw*maph):
+        if map[i] == t and explored[i] and pmap[i] > 1:
+            if closest == -1:
+                closest = i
+            elif pmap[i] < pmap[closest]:
+                closest = i
+    return closest
+
+def tileKnown(t):
+    for i in range(mapw*maph):
+        if explored[i] and map[i] == t:
+            return True
+    return False
+
 def explore():
     all = True
     for x in explored:
@@ -579,6 +597,7 @@ def explore():
         print("Monsters nearby.")
         describe(player.x, player.y)
         return False
+    foundExit = tileKnown(tl_down)
     pmap = pathMap(Actor.passable, player.x, player.y)
     closest = player.y*mapw+player.x
     for i in range(mapw*maph):
@@ -591,6 +610,11 @@ def explore():
         print("Explored all accessible areas.")
         return False
     autoMove(p[0][0], p[0][1])
+    if not foundExit:
+        if tileKnown(tl_down):
+            print("Found exit.")
+            describe(player.x, player.y)
+            return False
     return True
 
 def rest():
@@ -613,17 +637,6 @@ def rest():
             print("Monsters nearby.")
             break
     describe(player.x, player.y)
-
-def findTile(t):
-    pmap = pathMap(Actor.passable, player.x, player.y)
-    closest = -1
-    for i in range(mapw*maph):
-        if map[i] == t and explored[i] and pmap[i] > 1:
-            if closest == -1:
-                closest = i
-            elif pmap[i] < pmap[closest]:
-                closest = i
-    return closest
 
 def target(x2, y2, str):
     path = findPath(Actor.passable, player.x, player.y, x2, y2)
@@ -652,16 +665,18 @@ helpList = [
     ["help", "Show this list"],
     ["north/east/south/west", "Move/attack in a direction"],
     ["up/down", "Ascend/descend stairs"],
+    ["wait", "Do nothing for a turn"],
     ["look", "Repeat description of surroundings"],
     ["quit", "Quit the game"],
-    ["go <location>", "Go to a known location on the map"],
+    ["go <location>", "Go to a known location on the map, such as"],
+    ["", "\"entrance\", \"exit\" or \"door\""],
     ["rest", "Rest until HP/MP are restored"],
     ["explore", "Explore the map"],
 ]
 
 helpExtra = [
-    "Commands are auto-complete (e.g. \"ex\" instead of \"explore\")",
-    "\"go\" will accept door, entrance or exit",
+    "Commands and parameters are auto-complete (e.g. \"g en\"",
+    "instead of \"go entrance\").",
 ]
 
 print("textrogue - tdwsl 2022")
