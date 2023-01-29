@@ -7,7 +7,10 @@ import math
 mapw = 50
 maph = 30
 map = []
+explored = []
 player = 0
+level = 1
+turn = 0
 
 dirs = [[0,-1], [1,0], [0,1], [-1,0]]
 dirLetters = ["N", "E", "S", "W"]
@@ -24,6 +27,7 @@ tl_temp = 5
 tl_up = 6
 tl_down = 7
 tl_oob = 20
+tl_blocked = 20
 tl_tdoor = 20
 
 tileChars = [" ", "#", ".", "+", "-", "T", "<", ">"]
@@ -41,12 +45,10 @@ def setTile(x, y, t):
     if inBounds(x, y):
         map[y*mapw+x] = t
 
-def findPath(allowed, x1, y1, x2, y2):
+def pathMap(allowed, x2, y2):
     pmap = []
     for i in range(mapw*maph):
         pmap.append(0 if map[i] in allowed else -1)
-    if pmap[y1*mapw+x1] != 0 or pmap[y2*mapw+x2] != 0:
-        return []
     pmap[y2*mapw+x2] = 1
     g = 0
     while True:
@@ -63,6 +65,12 @@ def findPath(allowed, x1, y1, x2, y2):
                            pmap[y*mapw+x] = g+1
         if nutin:
             break
+    return pmap
+
+def findPath(allowed, x1, y1, x2, y2):
+    if not map[y1*mapw+x1] in allowed or not map[y2*mapw+x2] in allowed:
+        return []
+    pmap = pathMap(allowed, x2, y2)
     if pmap[y1*mapw+x1] == 0:
         return []
     x = x1
@@ -80,26 +88,141 @@ def findPath(allowed, x1, y1, x2, y2):
         path.append([x, y])
     return path
 
+def sees(x1, y1, x2, y2):
+    if x1 == x2 and y1 == y2:
+        return True
+    xd = x2-x1
+    yd = y2-y1
+    if xd*xd+yd*yd > sightDist*sightDist:
+        return False
+    m = 0
+    if abs(xd) > abs(yd):
+        m = abs(xd)
+    else:
+        m = abs(yd)
+    for i in range(1, m+1):
+        x = math.floor(x1+(xd*i)/m+0.5)
+        y = math.floor(y1+(yd*i)/m+0.5)
+        if x == x1 and y == y1:
+            continue
+        if not inBounds(x, y):
+            return False
+        if x == x2 and y == y2:
+            return True
+        if map[y*mapw+x] in [tl_door, tl_wall, tl_rock]:
+            return False
+    return False
+
+def getFov(x, y):
+    fov = []
+    for i in range(mapw*maph):
+        fov.append(sees(x, y, i%mapw, i//mapw))
+    return fov
+
+def updateExplored(fov):
+    for i in range(mapw*maph):
+        if fov[i]:
+            explored[i] = True
+
 class Actor:
     actors = []
+    passable = [tl_door, tl_path, tl_room, tl_up, tl_down]
 
-    def __init__(self, x=0, y=0, name="actor"):
+    def __init__(self, x=0, y=0, hp=5, mp=0, name="actor"):
         self.x = x
         self.y = y
         self.name = name
+        self.hp = hp
+        self.mhp = hp
+        self.mp = mp
+        self.mmp = mp
+        self.lvl = 0
+        self.xp = 0
+        self.mxp = 0
+        self.dead = False
+        self.under = tl_room
         Actor.actors.append(self)
 
-    def move(self, x, y):
-        passable = [tl_door, tl_path, tl_room, tl_up, tl_down]
-        if not getTile(x, y) in passable:
-            return 0
+    def calcStr(self, a):
+        return self.str - a.str//4
+
+    def block(self):
+        if not self.dead:
+            self.under = map[self.y*mapw+self.x]
+            map[self.y*mapw+self.x] = tl_blocked
+
+    def unblock(self):
+        if not self.dead:
+            map[self.y*mapw+self.x] = self.under
+
+    def meleeAttack(self, a):
+        visible = sees(player.x, player.y, self.x, self.y)
+        str = self.calcStr(a)
+        a.hp -= str
+        if visible:
+            print("{} attacks {} for {} damage.".format \
+                  (self.name, a.name, str))
+        if a.hp <= 0:
+            if visible:
+                print("{} dies!".format(a.name))
+            a.dead = True
+            self.xp += a.lvl
+
+    def actorAt(x, y):
         for a in Actor.actors:
-            if a != self:
-                if a.x == x and a.y == y:
-                    return 2
+            if a.x == x and a.y == y and not a.dead:
+                return a
+        return False
+
+    def move(self, x, y):
+        if self.dead:
+            return 0
+        if x == self.x and y == self.y:
+            return 1
+        if not getTile(x, y) in Actor.passable:
+            return 0
+        a = Actor.actorAt(x, y)
+        if a != False:
+            self.meleeAttack(a)
+            return 2
         self.x = x
         self.y = y
         return 1
+
+    def wander(self):
+        mdirs = dirs.copy()
+        random.shuffle(mdirs)
+        for d in mdirs:
+            if Actor.actorAt(self.x+d[0], self.y+d[1]) == False:
+                if getTile(self.x+d[0], self.y+d[1]) in Actor.passable:
+                    self.x += d[0]
+                    self.y += d[1]
+                    return
+
+    def update(self):
+        if turn % 8 == 0 and not self.dead and self.hp < self.mhp:
+            self.hp += 1
+
+    def enemyUpdate(self):
+        if self.dead:
+            return
+        if sees(self.x, self.y, player.x, player.y):
+            self.approach(player.x, player.y)
+        else:
+            self.wander()
+
+    def approach(self, x, y):
+        for a in Actor.actors:
+            a.block()
+        a = Actor.actorAt(x, y)
+        if a != False:
+            a.unblock()
+        self.unblock()
+        p = findPath(Actor.passable, self.x, self.y, x, y)
+        if len(p) != 0:
+            self.move(p[0][0], p[0][1])
+        for a in Actor.actors:
+            a.unblock()
 
     def moveAlert(self, x, y):
         d = [x-self.x, y-self.y]
@@ -135,9 +258,11 @@ def connectRooms(rooms):
                     if getTile(p[0]+d[0], p[1]+d[1]) == tl_rock:
                         setTile(p[0]+d[0], p[1]+d[1], tl_temp)
 
-def generateMap():
+def generateMap(up=False):
     global map
     global player
+    global explored
+    global turn
     t = tl_temp
     p = tl_path
     d = tl_tdoor
@@ -233,6 +358,18 @@ def generateMap():
         map[y*mapw+cx+w//2-1] = tl_tdoor
         last = [cx, cy]
         rooms.append([cx, cy])
+    if up:
+        rg = range(0, len(rooms)-1)
+    else:
+        rg = range(1, len(rooms))
+    Actor.actors = [player]
+    if level >= 1:
+        for i in rg:
+            r = rooms[i]
+            if random.randrange(0, 4) != 0:
+                gob = Actor(x=r[0], y=r[1], name="Goblin", hp=5)
+                gob.str = 2
+                gob.lvl = 1
     first = rooms[0]
     connectRooms(rooms)
     random.shuffle(rooms)
@@ -246,8 +383,17 @@ def generateMap():
             map[i] = tl_rock
     map[first[1]*mapw+first[0]] = tl_up
     map[last[1]*mapw+last[0]] = tl_down
-    player.x = first[0]
-    player.y = first[1]
+    if up:
+        player.x = last[0]
+        player.y = last[1]
+    else:
+        player.x = first[0]
+        player.y = first[1]
+    explored = []
+    for i in range(mapw*maph):
+        explored.append(not map[i] in Actor.passable)
+    updateExplored(getFov(player.x, player.y))
+    turn = 0
 
 def printMap():
     for i in range(mapw*maph):
@@ -274,37 +420,6 @@ def roomSize(x, y):
     rx2 -= 1
     ry2 -= 1
     return [rx, ry, rx2-rx+1, ry2-ry+1]
-
-def sees(x1, y1, x2, y2):
-    if x1 == x2 and y1 == y2:
-        return True
-    xd = x2-x1
-    yd = y2-y1
-    if xd*xd+yd*yd > sightDist*sightDist:
-        return False
-    m = 0
-    if abs(xd) > abs(yd):
-        m = abs(xd)
-    else:
-        m = abs(yd)
-    for i in range(1, m+1):
-        x = math.floor(x1+(xd*i)/m+0.5)
-        y = math.floor(y1+(yd*i)/m+0.5)
-        if x == x1 and y == y1:
-            continue
-        if not inBounds(x, y):
-            return False
-        if x == x2 and y == y2:
-            return True
-        if map[y*mapw+x] in [tl_door, tl_wall, tl_rock]:
-            return False
-    return False
-
-def getFov(x, y):
-    fov = []
-    for i in range(mapw*maph):
-        fov.append(sees(x, y, i%mapw, i//mapw))
-    return fov
 
 def whereStr(x1, y1, x2, y2):
     if x1 == x2 and y1 == y2:
@@ -334,8 +449,11 @@ def listItem(str):
         start = listVars[0]
     print("{} {}".format(start, str))
 
-def describe(x, y):
+def describe(x, y, status=True):
     print()
+    if status:
+        print("HP {}/{} MP {}/{}".format(player.hp, player.mhp, \
+              player.mp, player.mmp))
     fov = getFov(x, y)
     if map[y*mapw+x] == tl_door:
         print("You are in a doorway")
@@ -408,29 +526,243 @@ def describe(x, y):
                 listItem("{} {}".format \
                       (tileNames[map[i]], \
                        whereStr(x, y, i%mapw, i//mapw)))
+    listStart("There is", "And")
+    for a in Actor.actors:
+        if a != player:
+            if sees(x, y, a.x, a.y):
+                if a.dead:
+                    listItem("a dead {} {}".format \
+                             (a.name, whereStr(x, y, a.x, a.y)))
+                else:
+                    listItem("a {} {}".format \
+                             (a.name, whereStr(x, y, a.x, a.y)))
 
-player = Actor(name="You")
+def gameOver():
+    print("GAME OVER")
+
+def leaveDungeon():
+    print("You leave the dungeon.")
+
+def update():
+    global turn
+    for a in Actor.actors:
+        a.update()
+        if a != player:
+            a.enemyUpdate()
+    turn += 1
+
+def safe():
+    for a in Actor.actors:
+        if a != player and not a.dead:
+            if sees(player.x, player.y, a.x, a.y):
+                return False
+    return True
+
+def autoMove(x, y):
+    old = map[player.y*mapw+player.x]
+    player.moveAlert(x, y)
+    update()
+    updateExplored(getFov(player.x, player.y))
+    if old == tl_door and map[player.y*mapw+player.x] == tl_room:
+        describe(player.x, player.y, status=False)
+
+def explore():
+    all = True
+    for x in explored:
+        if not x:
+            all = False
+            break
+    if all:
+        print("Map explored.")
+        return False
+    if not safe():
+        print("Monsters nearby.")
+        describe(player.x, player.y)
+        return False
+    pmap = pathMap(Actor.passable, player.x, player.y)
+    closest = player.y*mapw+player.x
+    for i in range(mapw*maph):
+        if explored[i] == False:
+            if explored[closest] or pmap[i] < pmap[closest]:
+                closest = i
+    p = findPath(Actor.passable, player.x, player.y, \
+                 closest%mapw, closest//mapw)
+    if len(p) == 0:
+        print("Explored all accessible areas.")
+        return False
+    autoMove(p[0][0], p[0][1])
+    return True
+
+def rest():
+    hp = player.hp != player.mhp
+    mp = player.mp != player.mmp
+    if not mp and not hp:
+        print("No need.")
+        return
+    while True:
+        if safe():
+            update()
+            if player.hp == player.mhp and hp:
+                print("HP restored")
+            if player.mp == player.mmp and mp:
+                print("MP restored")
+                break
+            if player.hp == player.mhp and hp:
+                break
+        else:
+            print("Monsters nearby.")
+            break
+    describe(player.x, player.y)
+
+def findTile(t):
+    pmap = pathMap(Actor.passable, player.x, player.y)
+    closest = -1
+    for i in range(mapw*maph):
+        if map[i] == t and explored[i] and pmap[i] > 1:
+            if closest == -1:
+                closest = i
+            elif pmap[i] < pmap[closest]:
+                closest = i
+    return closest
+
+def target(x2, y2, str):
+    path = findPath(Actor.passable, player.x, player.y, x2, y2)
+    if len(path) == 0:
+        print("No path.")
+        return
+    for p in path:
+        if not safe():
+            print("Monsters nearby.")
+            describe(player.x, player.y)
+            return
+        autoMove(p[0], p[1])
+    print("Arrived at {}.".format(str))
+    describe(player.x, player.y)
+
+def yes(prompt):
+    yn = input("{} y/N ".format(prompt)).strip().lower()
+    return yn in ["y", "ye", "yes", "yeah"]
+
+player = Actor(name="Player", hp=10)
+player.lvl = 1
+player.mxp = 10
+player.str = 3
+
+helpList = [
+    ["help", "Show this list"],
+    ["north/east/south/west", "Move/attack in a direction"],
+    ["up/down", "Ascend/descend stairs"],
+    ["look", "Repeat description of surroundings"],
+    ["quit", "Quit the game"],
+    ["go <location>", "Go to a known location on the map"],
+    ["rest", "Rest until HP/MP are restored"],
+    ["explore", "Explore the map"],
+]
+
+helpExtra = [
+    "Commands are auto-complete (e.g. \"ex\" instead of \"explore\")",
+    "\"go\" will accept door, entrance or exit",
+]
+
+print("textrogue - tdwsl 2022")
+print("Type \"help\" for a list of game commands")
 
 generateMap()
-printMap()
+#printMap()
 
-desc = True
+upd = False
+describe(player.x, player.y)
 while True:
-    if desc:
+    if upd:
+        update()
+        if player.hp <= 0:
+            gameOver()
+            break
         describe(player.x, player.y)
-    desc = False
+        updateExplored(getFov(player.x, player.y))
+    upd = False
     line = input(">").strip().lower().split(" ")
     if line[0] == "":
         print("Enter a command.")
     elif "north".startswith(line[0]):
-        desc = player.moveAlert(player.x, player.y-1)
+        upd = player.moveAlert(player.x, player.y-1)
     elif "east".startswith(line[0]):
-        desc = player.moveAlert(player.x+1, player.y)
+        upd = player.moveAlert(player.x+1, player.y)
     elif "south".startswith(line[0]):
-        desc = player.moveAlert(player.x, player.y+1)
+        upd = player.moveAlert(player.x, player.y+1)
     elif "west".startswith(line[0]):
-        desc = player.moveAlert(player.x-1, player.y)
+        upd = player.moveAlert(player.x-1, player.y)
+    elif "up".startswith(line[0]):
+        if map[player.y*mapw+player.x] == tl_up:
+            if level == 1:
+                if yes("Leave the dungeon?"):
+                    leaveDungeon()
+                    break
+            else:
+                print("You ascend up a maze of stairs...")
+                level -= 1
+                generateMap(up=True)
+                describe(player.x, player.y)
+        else:
+            print("There is no way up here.")
+    elif "down".startswith(line[0]):
+        if map[player.y*mapw+player.x] == tl_down:
+            print("You descend down a maze of stairs...")
+            level += 1
+            generateMap()
+            describe(player.x, player.y)
+        else:
+            print("There is no way down here.")
+    elif "wait".startswith(line[0]):
+        print("You wait.")
+        upd = True
     elif "quit".startswith(line[0]):
+        #if yes("Really quit?"):
+            #break
         break
+    elif "help".startswith(line[0]):
+        print()
+        for h in helpList:
+            print("{}{}{}".format(h[0], "\t"*(3 - len(h[0])//8), h[1]))
+        print()
+        for h in helpExtra:
+            print(h)
+    elif "look".startswith(line[0]):
+        describe(player.x, player.y)
+    elif "explore".startswith(line[0]):
+        while explore():
+            continue
+    elif "rest".startswith(line[0]):
+        rest()
+    elif "go".startswith(line[0]):
+        if not safe():
+            print("Monsters nearby.")
+            continue
+        if len(line) > 1:
+            if line[1] == "to":
+                del line[1]
+        else:
+            line.append("####")
+        options = ["entrance", "exit", "door"]
+        for o in options:
+            if o.startswith(line[1]):
+                line[1] = o
+                break
+        xy = 0
+        if line[1] == "entrance":
+            xy = findTile(tl_up)
+        elif line[1] == "exit":
+            xy = findTile(tl_down)
+        elif line[1] == "door":
+            xy = findTile(tl_door)
+        else:
+            print("Invalid location.")
+            continue
+        if xy == -1:
+            print("Couldn't find location - try exploring first.")
+            continue
+        print("Targeting {} {}".format \
+              (line[1], whereStr(player.x, player.y, xy%mapw, xy//mapw)))
+        target(xy%mapw, xy//mapw, line[1])
     else:
         print("You can't do that.")
