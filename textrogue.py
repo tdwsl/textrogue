@@ -465,7 +465,7 @@ def describe(x, y, status=True):
                 continue
             if t == tl_path:
                 listItem("a corridor {}".format(dirNames[i]))
-            else:
+            elif t != tl_door:
                 sz = roomSize(x+d[0], y+d[1])
                 listItem("a {}x{} room {}".format \
                       (sz[2], sz[3], dirNames[i]))
