@@ -200,6 +200,8 @@ class Actor:
                     return
 
     def update(self):
+        if turn % 12 == 0 and not self.dead and self.mp < self.mmp:
+            self.mp += 1
         if turn % 8 == 0 and not self.dead and self.hp < self.mhp:
             self.hp += 1
 
@@ -359,17 +361,11 @@ def generateMap(up=False):
         last = [cx, cy]
         rooms.append([cx, cy])
     if up:
-        rg = range(0, len(rooms)-1)
+        roomrg = range(0, len(rooms)-1)
     else:
-        rg = range(1, len(rooms))
-    Actor.actors = [player]
-    if level >= 1:
-        for i in rg:
-            r = rooms[i]
-            if random.randrange(0, 4) != 0:
-                gob = Actor(x=r[0], y=r[1], name="Goblin", hp=5)
-                gob.str = 2
-                gob.lvl = 1
+        roomrg = range(1, len(rooms))
+
+    # connect rooms
     first = rooms[0]
     connectRooms(rooms)
     random.shuffle(rooms)
@@ -383,12 +379,54 @@ def generateMap(up=False):
             map[i] = tl_rock
     map[first[1]*mapw+first[0]] = tl_up
     map[last[1]*mapw+last[0]] = tl_down
+
+    # init player
     if up:
         player.x = last[0]
         player.y = last[1]
     else:
         player.x = first[0]
         player.y = first[1]
+
+    # place enemies
+    def goblin(x, y):
+        gob = Actor(x=x, y=y, name="Goblin", hp=6)
+        gob.str = 3
+        gob.lvl = 3
+        return gob
+    def slime(x, y):
+        slm = Actor(x=x, y=y, name="Slime", hp=4)
+        slm.str = 2
+        slm.lvl = 1
+        return slm
+    def orc(x, y):
+        orc = Actor(x=x, y=y, name="Orc", hp=12)
+        orc.str = 5
+        orc.lvl = 5
+        return orc
+    roomSpecs = [
+        [4, [slime, slime, goblin]],
+        [6, [slime, goblin, goblin]],
+        [12, [slime, slime, slime, goblin, orc]],
+        [8, [goblin, orc, orc]],
+        [8, [goblin, orc, orc]],
+        [20, [goblin]],
+        [8, [orc]],
+        [8, [orc]],
+        [8, [orc]],
+        [8, [orc]],
+        [8, [orc]],
+    ]
+    Actor.actors = [player]
+    spec = roomSpecs[level-1]
+    for i in range(spec[0]):
+        r = rooms[random.choice(roomrg)]
+        occ = Actor.actorAt(r[0], r[1])
+        act = random.choice(spec[1])(r[0], r[1])
+        if occ != False:
+            act.wander()
+            act.wander()
+
     explored = []
     for i in range(mapw*maph):
         explored.append(not map[i] in Actor.passable)
@@ -552,6 +590,29 @@ def update():
             a.enemyUpdate()
     turn += 1
 
+def levelUp():
+    player.lvl += 1
+    player.xp -= player.mxp
+    player.mxp = math.floor(player.mxp*1.3)
+    oldstr = player.str
+    oldhp = player.mhp
+    oldmp = player.mmp
+    player.str += math.floor(0.35*player.lvl)
+    player.mhp += math.floor(0.5*player.lvl)
+    player.hp = math.floor(player.hp*(player.mhp/oldhp))
+    player.mmp += math.floor(0.25*player.lvl)
+    player.mp = math.floor(player.mp*(player.mmp/oldmp))
+    print()
+    print("Level up!")
+    if oldstr != player.str:
+        print("STR\t{}\tto {}".format(oldstr, player.str))
+    if oldhp != player.mhp:
+        print("Max HP\t{}\tto {}".format(oldhp, player.mhp))
+    if oldmp != player.mmp:
+        print("Max MP\t{}\tto {}".format(oldmp, player.mmp))
+    if player.xp >= player.mxp:
+        levelUp()
+
 def safe():
     for a in Actor.actors:
         if a != player and not a.dead:
@@ -656,9 +717,9 @@ def yes(prompt):
     yn = input("{} y/N ".format(prompt)).strip().lower()
     return yn in ["y", "ye", "yes", "yeah"]
 
-player = Actor(name="Player", hp=10)
+player = Actor(name="Player", hp=10, mp=2)
 player.lvl = 1
-player.mxp = 10
+player.mxp = 3
 player.str = 3
 
 helpList = [
@@ -693,6 +754,8 @@ while True:
         if player.hp <= 0:
             gameOver()
             break
+        if player.xp >= player.mxp:
+            levelUp()
         describe(player.x, player.y)
         updateExplored(getFov(player.x, player.y))
     upd = False
